@@ -65,6 +65,7 @@ while os.path.exists( outputmid ):
 settingsfile= filepath + ".ini";
 #
 frame= 0;
+printed_for_frame=0;
 resize= 0;
 convertCvtColor=1;
 # For OpenCV 2.X ..
@@ -242,6 +243,8 @@ use_snap_notes_to_grid = False;
 notes_grid_size=32;
 #
 midi_file_format = 0;
+#
+blackkey_relative_position = 0.4
 
 #cfg
 home = expanduser("~")
@@ -299,6 +302,9 @@ def loadsettings( cfgfile ):
    print(midi_file_format);
   if config.has_option(section, 'output_midi_tempo'):
    tempo = config.getint(section, 'output_midi_tempo')
+  if config.has_option(section, 'blackkey_relative_position'):
+   blackkey_relative_position = config.getfloat(section, 'blackkey_relative_position')
+     
   # Sparks 
   if config.has_option(section, 'keyp_spark_y_pos'):
    keyp_spark_y_pos = config.getint(section, 'keyp_spark_y_pos')
@@ -320,8 +326,12 @@ def loadsettings( cfgfile ):
   if config.has_option(section, 'xoffset_whitekeys'):
    xoffset_whitekeys = config.getint(section, 'xoffset_whitekeys')
   if config.has_option(section, 'yoffset_whitekeys'):
-   yoffset_whitekeys = config.getint(section, 'yoffset_whitekeys')
-  
+   yoffset_whitekeys = config.getint(section, 'yoffset_whitekeys')  
+  if config.has_option(section, 'yoffset_blackkeys'):
+   yoffset_blackkeys = config.getint(section, 'yoffset_blackkeys')
+  if config.has_option(section, 'whitekey_width'):
+   yoffset_blackkeys = config.getint(section, 'whitekey_width')   
+
   if config.has_option(section, 'keyp_colors'):
    skeyp_colors = config.get(section, 'keyp_colors')
    if ( skeyp_colors.strip() != "" ):
@@ -437,11 +447,11 @@ def updatekeys( append=0 ):
 #     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width *0.5 ));
    # tune by wuzhuoqing  
    if (j == 1) or ( j == 6 ):
-     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width *0.4 ));
+     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width * blackkey_relative_position ));
    if (j == 8 ):
-     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width *0.5 ));
+     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width * 0.5 ));
    if ( j ==3 ) or ( j == 10 ):
-     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width *0.7 ));
+     keys_pos[i*12+j][0] = int(round( xx  + whitekey_width * (1.0 - blackkey_relative_position) ));
      
    xx += whitekey_width;
   pass;
@@ -464,6 +474,7 @@ def savesettings():
  config.set(section, 'notes_overlap', str(int(notes_overlap)));
  config.set(section, 'sensitivity', str(int(keyp_delta)));
  config.set(section, 'output_midi_tempo', str(int(tempo)));
+ config.set(section, 'blackkey_relative_position', str(float(blackkey_relative_position)));
  #Sparks 
  config.set(section, 'keyp_spark_y_pos', str(int(keyp_spark_y_pos)));
  config.set(section, 'use_sparks', str(int(use_sparks)));
@@ -480,6 +491,8 @@ def savesettings():
 
  config.set(section, 'xoffset_whitekeys',str(int(xoffset_whitekeys)));
  config.set(section, 'yoffset_whitekeys',str(int(yoffset_whitekeys)));
+ config.set(section, 'yoffset_blackkeys',str(int(yoffset_blackkeys)));
+ config.set(section, 'whitekey_width',str(int(whitekey_width)));
 
  skeyp_colors="";
  for i in keyp_colors:
@@ -1401,7 +1414,10 @@ def update_sparks_delta(sender,value):
     keyp_colors_sparks_sensitivity[sender.id] = sender.value
     #print("keyp_colors_sparks_sensitivity["+str(sender.id)+"] = "+ str(sender.value) );
      
-
+def update_blackkey_relative_position(sender,value):
+  global blackkey_relative_position;
+  blackkey_relative_position = value * 0.001;
+  updatekeys();
 
 def change_use_alternate_keys(sender):
    global use_alternate_keys,extra_label1;
@@ -1493,9 +1509,11 @@ settingsWindow.appendChild(settingsWindow_slider3);
 
 settingsWindow_slider4 = GLSlider(1,215, 240,18, 0,2,midi_file_format,label="Output midi format");
 settingsWindow_slider4.round=0;
-settingsWindow.appendChild(settingsWindow_slider3);
 settingsWindow.appendChild(settingsWindow_slider4);
 
+settingsWindow_slider5 = GLSlider(1,255, 240,18, 0,1000,blackkey_relative_position * 1000, update_blackkey_relative_position, label="black key relative pos");
+settingsWindow_slider5.round=0;
+settingsWindow.appendChild(settingsWindow_slider5);
 
 
 # for i in range( len( keyp_colors ) ):
@@ -1593,9 +1611,15 @@ def drawframe():
  global keyp_delta;
  global minimal_duration;
  global tempo;
+ global frame;
+ global printed_for_frame;
  #global old_spark_color;
  #global cur_spark_color;
- 
+ print_for_frame_debug = False
+ if printed_for_frame != frame:
+  print_for_frame_debug = True
+ printed_for_frame = frame
+
  scale=1.0;
  mousex, mousey = pygame.mouse.get_pos();
 
@@ -1672,23 +1696,29 @@ def drawframe():
           keypressed=1;
           pressedcolor = keyc;
           if ( use_sparks ):
-            unpressed_by_spark_delta = ( abs( int(sparkkey[0]) - keyc[0] ) < spark_delta ) and ( abs( int(sparkkey[1]) - keyc[1] ) < spark_delta ) and ( abs( int(sparkkey[2]) - keyc[2] ) < spark_delta );
+            #unpressed_by_spark_delta = ( abs( int(sparkkey[0]) - keyc[0] ) < spark_delta ) and ( abs( int(sparkkey[1]) - keyc[1] ) < spark_delta ) and ( abs( int(sparkkey[2]) - keyc[2] ) < spark_delta );
+            has_spark_delta = ((sparkkey[0] - keyc[0] ) > spark_delta ) or ((sparkkey[1] - keyc[1] ) > spark_delta ) or ((sparkkey[2] - keyc[2] ) > spark_delta );
             #unpressed_by_spark_fade = ( cur_spark_color[i][0] <  old_spark_color[i][0]) and ( cur_spark_color[i][1] <  old_spark_color[i][1]) and ( cur_spark_color[i][2] <  old_spark_color[i][2]) ;
-            #unpressed_by_spark_fade_delta = ( abs( cur_spark_color[i][0] - old_spark_color[i][0]) > 20 ) 
-            if ( unpressed_by_spark_delta ):
-             keypressed=0;
+            #unpressed_by_spark_fade_delta = ( abs( cur_spark_color[i][0] - old_spark_color[i][0]) > 20 ) 			
+            if print_for_frame_debug:
+             print("note %d key_id %d spark_delta %d sparkkey vs keyc %d %d, %d %d, %d %d" % (note, key_id, spark_delta, sparkkey[0], keyc[0], sparkkey[1], keyc[1], sparkkey[2], keyc[2]))
+            if ( not has_spark_delta ):
+             keypressed=2;
 
   glPushMatrix();
   glTranslatef(keys_pos[i][0],keys_pos[i][1],0);
 
   glColor4f(1,1,1,0.5);
   DrawQuad(-0.5,-20,0.5,7);
-  if ( keypressed == 1 ):
+  if ( keypressed != 0 ):
     #glColor4f(1.0, 0.5, 1.0, 0.9);
     glColor4f(pressedcolor[0]/255.0,pressedcolor[1]/255.0,pressedcolor[2]/255.0,0.9);
     DrawQuad(-6,-7,6,7);
     glColor4f(0,0,0,1);
-    DrawRect(-7,-9,7,9,3);
+    if ( keypressed == 1):
+      DrawRect(-7,-9,7,9,3);
+    else:
+      DrawRect(-5,-7,5,7,3);
   else:
     glColor4f(0,0,0,1);
     DrawRect(-7,-7,7,7,1);
@@ -1862,11 +1892,13 @@ def processmidi():
           deltaid = j;
          keypressed=1;
          if ( use_sparks ):
-           if ( abs( int(sparkkey[0]) - keyp_colors[j][0] ) < keyp_colors_sparks_sensitivity[j] ) and ( abs( int(sparkkey[1]) - keyp_colors[j][1] ) < keyp_colors_sparks_sensitivity[j] ) and ( abs( int(sparkkey[2]) - keyp_colors[j][2] ) < keyp_colors_sparks_sensitivity[j] ):
-             keypressed=0;
+           has_spark_delta = ((sparkkey[0] - keyp_colors[j][0] ) > keyp_colors_sparks_sensitivity[j] ) or ((sparkkey[1] - keyp_colors[j][1] ) > keyp_colors_sparks_sensitivity[j] ) or ((sparkkey[2] - keyp_colors[j][2] ) > keyp_colors_sparks_sensitivity[j] );
+           #if ( abs( int(sparkkey[0]) - keyp_colors[j][0] ) < keyp_colors_sparks_sensitivity[j] ) and ( abs( int(sparkkey[1]) - keyp_colors[j][1] ) < keyp_colors_sparks_sensitivity[j] ) and ( abs( int(sparkkey[2]) - keyp_colors[j][2] ) < keyp_colors_sparks_sensitivity[j] ):
+           if ( not has_spark_delta ):
+             keypressed=2;
          
     #
-    if ( keypressed==1 ):
+    if ( keypressed==1 or keypressed==2 ):
        note_channel=keyp_colors_channel[ deltaid ];
 
     if ( debug == 1 ):
@@ -1877,13 +1909,12 @@ def processmidi():
       cv2.rectangle(image, (pixx-1,pixy-1), (pixx+1,pixy+1), (255,0,255));
 #      cv2.putText(image, str(note), (pixx-5,pixy+20), 0, 0.5, (255,0,255));
 
-    # reg pressed key;
-    if keypressed==1:
+    # reg pressed key; when keypressed==2 and previous keypressed state is 0 or 2 we should also goes here
+    if keypressed==1 or (keypressed==2 and notes[note] != 1):
       # if key is not pressed;
       if ( notes[note] == 0 ):
         if ( debug_keys == 1 ):
           print("note pressed on :" + str( note ));
-        notes[ note ] = 1;
         notes_db[ note ] = frame;
         if (first_note_time == 0):
           first_note_time = frame / fps;
@@ -1893,8 +1924,10 @@ def processmidi():
             notes_channel[ note ] = 0
           else:
             notes_channel[ note ] = 1
+      # always update to last press state
+      notes[ note ] = keypressed;
 
-      if ( notes[note] == 1 ) and ( notes_channel[ note ] != note_channel ) and ( notes_overlap == 1 ):
+      if ( notes[note] != 0 ) and ( notes_channel[ note ] != note_channel ) and ( notes_overlap == 1 ):
         # case if one key over other
         time = notes_db[note] / fps;
         duration = ( frame - notes_db[note] ) / fps;
@@ -1926,8 +1959,8 @@ def processmidi():
         notes_db[ note ] = frame;
         notes_channel[ note ] = note_channel;
     else:
-      # if key been presed and released:
-      if ( notes[note] == 1 ):
+      # if key been presed and released: two cases goes here keypressed==0 or (keypressed==2 and previous state is keypressed==1)
+      if ( notes[note] != 0):
         notes[ note ] = 0;
         notes_de[ note ] = frame;
         time = notes_db[note] / fps;
@@ -1956,6 +1989,11 @@ def processmidi():
 
           channel_has_note[ note_channel ] = 1;
           notecnt+=1;
+        # coming here when use sparks is true and previous state is keypressed==1. We consider the key is released and then pressed again
+        if (keypressed==2):
+          notes[ note ] = keypressed;
+          notes_db[ note ] = frame;
+          notes_channel[ note ] = note_channel;
 
   xapp=0;
   if ( debug == 1 ):
@@ -2301,7 +2339,7 @@ def main():
       wnd.update_mouse_move(mousex,mousey)
 
     pygame.display.flip();
-    framerate();
+    #framerate();
     #limit fps to 60 and get the frame time in milliseconds
     ms = clock.tick(60)
     
